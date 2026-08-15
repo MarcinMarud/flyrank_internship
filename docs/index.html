@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Predicting Content Refresh Priority from Observable Search Signals</title>
+<style>
+  body {
+    margin: 0;
+    background: #ffffff;
+    color: #000000;
+    font-family: "Times New Roman", Times, Georgia, serif;
+    line-height: 1.6;
+  }
+  .page {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 56px 28px 96px;
+  }
+  header {
+    text-align: center;
+    border-bottom: 1px solid #000000;
+    padding-bottom: 28px;
+    margin-bottom: 32px;
+  }
+  h1.title {
+    font-size: 1.65rem;
+    font-weight: bold;
+    line-height: 1.35;
+    margin: 0 0 14px;
+  }
+  .authors {
+    font-size: 1.05rem;
+    margin: 0 0 6px;
+  }
+  .affiliation {
+    font-size: 0.9rem;
+    color: #000000;
+    font-style: italic;
+    margin: 0;
+  }
+  h2 {
+    font-size: 1.2rem;
+    font-weight: bold;
+    margin: 40px 0 12px;
+    border-bottom: 1px solid #000000;
+    padding-bottom: 4px;
+  }
+  h3 {
+    font-size: 1.02rem;
+    font-weight: bold;
+    font-style: italic;
+    margin: 24px 0 8px;
+  }
+  p {
+    margin: 0 0 14px;
+    text-align: justify;
+    font-size: 1rem;
+  }
+  .abstract-block h3 {
+    font-style: italic;
+    margin-top: 0;
+  }
+  .keywords {
+    font-size: 0.95rem;
+    margin: 0 0 8px;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 14px 0 4px;
+    font-size: 0.95rem;
+  }
+  th, td {
+    border: 1px solid #000000;
+    padding: 6px 10px;
+    text-align: center;
+  }
+  th {
+    background: #d9d9d9;
+    font-weight: bold;
+  }
+  td:first-child, th:first-child {
+    text-align: left;
+  }
+  .caption {
+    text-align: center;
+    font-style: italic;
+    font-size: 0.9rem;
+    margin: 4px 0 24px;
+  }
+  figure {
+    margin: 20px 0 4px;
+    text-align: center;
+  }
+  figure img {
+    max-width: 100%;
+    border: 1px solid #000000;
+  }
+  .divider {
+    border: none;
+    border-top: 1px solid #000000;
+    margin: 40px 0;
+  }
+  footer {
+    margin-top: 56px;
+    padding-top: 16px;
+    border-top: 1px solid #000000;
+    font-size: 0.9rem;
+    text-align: center;
+  }
+  @media print {
+    body { font-size: 12pt; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+<header>
+  <h1 class="title">Predicting Content Refresh Priority from Observable Search Signals: A Ranking Analysis on the FlyRank Warehouse</h1>
+  <p class="authors">Marcin Marud</p>
+  <p class="affiliation">FlyRank ML Internship Capstone</p>
+</header>
+
+<section class="abstract-block">
+  <h3>Abstract</h3>
+  <p>
+    This paper examines which observable content and search signals are associated with a future decline in page visibility, using a slice of the FlyRank internship warehouse release. Features were constructed from March 2026 search performance and content metadata, and the outcome variable was defined from an independent future window, April 2026, in which a content item's impressions fell below seventy percent of its March level. Restricting to items with meaningful March visibility yielded 60,744 eligible content items. A transparent rule based on staleness and visibility was compared with Logistic Regression and Random Forest classifiers under a client grouped holdout split. Logistic Regression achieved the strongest result, an area under the receiver operating characteristic curve of 0.595 and an average precision of 0.426 against a base rate of 33.3 percent, a modest but genuine improvement over the baseline rule's area under the curve of 0.459. The results support a decision support ranking for content review rather than a causal claim about what drives search performance.
+  </p>
+  <p class="keywords">Keywords: search performance, content refresh, ranking, feature engineering, decline prediction</p>
+</section>
+
+<section>
+  <h2>1. Introduction</h2>
+  <p>
+    Organizations that maintain large content inventories routinely face more candidate pages for review than they have staff time to evaluate. A recurring operational question is therefore not whether a page should eventually be revisited, but which pages should be revisited first, given limited reviewer capacity. This paper treats that question as a ranking problem: given a set of observable signals about a content item at a point in time, produce an ordered list such that items nearer the top are more likely to need attention in the near future.
+  </p>
+  <p>
+    Two kinds of error are possible in such a system, and they carry different costs. A false positive, a page flagged for review that does not in fact decline, wastes a reviewer's limited time. A false negative, a page that declines without being flagged, allows a real problem to continue unaddressed until the next review cycle, at which point the loss has compounded. Because these costs are asymmetric, a ranked queue that can be worked through in priority order is preferable to a single binary decision rule.
+  </p>
+  <p>
+    A simple threshold rule can only combine a small number of signals that a human analyst has already thought to combine, at fixed cut points chosen in advance. A statistical model, by contrast, can weigh several signals jointly and can be evaluated for whether that joint weighting yields a genuine improvement over the fixed rule. The remainder of this paper describes the data, the construction of a non circular future window label, the modelling approach, and the resulting comparison between a transparent baseline and two supervised classifiers.
+  </p>
+</section>
+
+<section>
+  <h2>2. Data</h2>
+  <p>
+    This study draws on the <code>fact_content_daily_performance</code> and <code>dim_content</code> tables of the FlyRank internship warehouse release, hosted on Hugging Face. Two consecutive months were used. March 2026 supplies every model feature; April 2026 is used exclusively to define the outcome variable and is never presented to the model as an input. This separation is the central design choice of the paper, and it is discussed further in Section 4.
+  </p>
+  <p>
+    The March feature window contains 331,437 content by client rows after data cleaning. The April outcome window contains 362,172 content level rows. Restricting the sample to content items whose March impressions were at or above the fiftieth percentile, a minimum of 242 impressions, yields 60,744 eligible content items, which form the analytic sample used throughout.
+  </p>
+  <p>
+    Fields corresponding to product computed decisions, including any priority score or health score the FlyRank application itself might generate, are not present in this release and are not used. All identifiers are pseudonymous hashes used solely for joining and grouping; no client name, domain, URL, or private query text appears in the data or in this paper.
+  </p>
+</section>
+
+<section>
+  <h2>3. Signal Audit</h2>
+  <p>
+    Before constructing a baseline rule, two candidate signals were examined directly against bucketed outcomes, each corresponding to a category of signal used informally in content operations.
+  </p>
+
+  <h3>3.1 Staleness</h3>
+  <p>
+    Content age since last update was bucketed into four ranges. Table 1 reports the count, median impressions, and median click through rate within each bucket.
+  </p>
+  <table>
+    <thead>
+      <tr><th>Days since update</th><th>n</th><th>Median impressions</th><th>Median CTR</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Under 90 days</td><td>60,674</td><td>1,536</td><td>0.00186</td></tr>
+      <tr><td>90 to 180 days</td><td>59</td><td>4,276</td><td>0.00157</td></tr>
+      <tr><td>180 to 365 days</td><td>11</td><td>490</td><td>0.00297</td></tr>
+    </tbody>
+  </table>
+  <p class="caption">Table 1. Distribution of search performance across staleness buckets.</p>
+  <p>
+    The bucket under ninety days accounts for 60,674 of the 60,744 eligible rows, leaving the two older buckets too small to support a reliable comparison. The verdict on this signal is therefore mixed, and a firmer conclusion would require either a larger sample or a coarser binning scheme.
+  </p>
+
+  <h3>3.2 Position and click through rate</h3>
+  <p>
+    Average search position was bucketed into four tiers. Table 2 reports the same summary statistics.
+  </p>
+  <table>
+    <thead>
+      <tr><th>Position tier</th><th>n</th><th>Median CTR</th><th>Median impressions</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>1 to 3</td><td>5,247</td><td>0.00279</td><td>2,436</td></tr>
+      <tr><td>4 to 10</td><td>29,982</td><td>0.00238</td><td>1,720</td></tr>
+      <tr><td>11 to 20</td><td>13,328</td><td>0.00169</td><td>1,079.5</td></tr>
+      <tr><td>21 or lower</td><td>12,187</td><td>0.00066</td><td>1,575</td></tr>
+    </tbody>
+  </table>
+  <p class="caption">Table 2. Click through rate by search position tier.</p>
+  <p>
+    Median click through rate declines in an approximately monotonic pattern from the best position tier to the worst, consistent with the well established relationship between search position and click behaviour. This signal is treated as confirmed for the purposes of baseline construction.
+  </p>
+</section>
+
+<section>
+  <h2>4. Methodology</h2>
+
+  <h3>4.1 Features</h3>
+  <p>
+    Five features were retained for modelling, each chosen because it is observable at the point a review decision would be made, using only March data: cumulative impressions, cumulative clicks, average search position, word count, and days since the content item was last updated. The update date used to compute the final feature was capped at the end of the March window, so that no feature reflects an update occurring after the point at which a reviewer would be acting.
+  </p>
+
+  <h3>4.2 Outcome definition</h3>
+  <p>
+    The outcome variable is defined as one if a content item's April impressions fell below seventy percent of its March impressions, and zero otherwise, restricted to the eligible sample described in Section 2. Because this definition draws entirely on April data, a period the feature set never observes, the label is a genuine future outcome rather than a rule derived proxy. An earlier iteration of this analysis defined the outcome from the same window as the features and found that a Random Forest classifier achieved a near perfect score; that result was subsequently identified as an artefact of the label being partially reconstructable from the input features, and the design was revised to the future window formulation used here.
+  </p>
+
+  <h3>4.3 Baseline rule</h3>
+  <p>
+    A transparent baseline flags a content item when its March days since update is at or above the seventieth percentile and its March impressions are at or above the sixtieth percentile, 242 impressions. Of the 60,744 eligible items, 24,304 were flagged under this rule.
+  </p>
+
+  <h3>4.4 Validation design</h3>
+  <p>
+    The sample was split by client rather than by row, using a seventy thirty grouped shuffle split, and the split was verified to contain no client in both the training and test partitions. A row level split would risk allowing the model to partially memorise site wide patterns for a client seen during training, inflating apparent performance when that same client reappears in the test set. The training partition contained 20,898 positive cases; the test partition contained 2,271.
+  </p>
+</section>
+
+<section>
+  <h2>5. Results</h2>
+  <p>
+    Table 3 reports the area under the receiver operating characteristic curve and average precision for the baseline rule, a Logistic Regression classifier, and a Random Forest classifier, all evaluated on the same client grouped test partition.
+  </p>
+  <table>
+    <thead>
+      <tr><th>Method</th><th>ROC AUC</th><th>Average precision</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Baseline rule</td><td>0.459</td><td>0.322</td></tr>
+      <tr><td>Logistic Regression</td><td>0.595</td><td>0.426</td></tr>
+      <tr><td>Random Forest</td><td>0.577</td><td>0.407</td></tr>
+    </tbody>
+  </table>
+  <p class="caption">Table 3. Model comparison on the client grouped test partition. Test set base rate: 33.3 percent positive.</p>
+
+  <figure>
+    <img src="results_auc_chart.png" alt="Bar chart comparing ROC AUC for baseline rule, logistic regression, and random forest">
+  </figure>
+  <p class="caption">Figure 1. Area under the ROC curve by method.</p>
+
+  <p>
+    Both classifiers exceed the baseline rule on both metrics. Logistic Regression achieves the highest area under the curve, 0.595, and the highest average precision, 0.426, against a test set base rate of 33.3 percent. The baseline rule's area under the curve of 0.459 is close to the level expected under random ranking, which indicates that fixed thresholds on staleness and visibility, applied without combination, carry little discriminative power for next month decline on their own; the improvement realised by the classifiers appears to come from combining signals rather than from any single signal being independently strong.
+  </p>
+</section>
+
+<section>
+  <h2>6. Error Analysis and Feature Importance</h2>
+  <p>
+    Table 4 reports Random Forest feature importances, computed as mean decrease in impurity across the ensemble.
+  </p>
+  <table>
+    <thead>
+      <tr><th>Feature</th><th>Importance</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Word count</td><td>0.300</td></tr>
+      <tr><td>Impressions (March)</td><td>0.292</td></tr>
+      <tr><td>Average position</td><td>0.290</td></tr>
+      <tr><td>Clicks (March)</td><td>0.106</td></tr>
+      <tr><td>Days since update</td><td>0.012</td></tr>
+    </tbody>
+  </table>
+  <p class="caption">Table 4. Random Forest feature importance.</p>
+  <p>
+    Importance is distributed fairly evenly across word count, impressions, and average position, with clicks contributing less and days since update contributing very little. No single feature dominates the ranking, which is consistent with a genuinely non circular target; in the earlier same window formulation described in Section 4.2, importance concentrated almost entirely on the two features from which that label had been constructed.
+  </p>
+  <p>
+    On the test partition, the Random Forest produced 114 false positives and 871 false negatives at a 0.7 and 0.3 probability threshold respectively. The considerably larger false negative count indicates that the model is conservative under these thresholds: it more often fails to flag a content item that subsequently declines than it raises an unwarranted alarm. This asymmetry should inform how a reviewer interprets the absence of a flag, which offers weaker reassurance than the presence of a flag offers warning.
+  </p>
+</section>
+
+<section>
+  <h2>7. Limitations</h2>
+  <p>
+    Several limitations bound the claims this paper can support. The analysis covers a single feature month and a single outcome month within a longer historical panel, and the results have not been checked against other month pairs, so seasonal effects cannot be ruled out. The seventy percent decline threshold and the median impressions eligibility cutoff are analytic choices rather than the only reasonable definitions of decline. The staleness signal examined in Section 3.1 remains inconclusive given the small size of the two older buckets. Finally, all findings in this paper are associative. Nothing here establishes that any observed signal causes a change in search performance, and nothing in this paper makes any claim about the mechanics of a search engine ranking algorithm.
+  </p>
+</section>
+
+<section>
+  <h2>8. Recommendations for Application</h2>
+  <p>
+    The strongest pattern among the highest ranked candidates in this analysis combines high March visibility, several of the top twenty candidates exceeded ten thousand impressions, with roughly four months or more since the last recorded content update; the median days since update among the top twenty was 124. A practitioner using a ranking of this kind should treat a high score as a hypothesis warranting review rather than an automatic verdict, since site restructuring events such as redirects or content consolidation, and metadata only edits not reflected in the recorded update timestamp, can each produce an elevated score without an underlying content problem. Given the false negative pattern reported in Section 6, periodic spot checks of items just below the flagging threshold are also advisable.
+  </p>
+</section>
+
+<section>
+  <h2>Reproducibility</h2>
+  <p>
+    Notebooks: work/notebooks/w02_research_question.ipynb, w02_ml_task_framing.ipynb, w03_data_contract.ipynb, w04_baseline_score.ipynb, w05_model.ipynb, capstone.ipynb.<br>
+    Repository: <a href="https://github.com/MarcinMarud/flyrank_internship">https://github.com/MarcinMarud/flyrank_internship</a>
+  </p>
+</section>
+
+<hr class="divider">
+
+<section>
+  <h2>Acknowledgements</h2>
+  <p>Built on the FlyRank ML Internship dataset (<a href="https://flyrank.ai">flyrank.ai</a>).</p>
+</section>
+
+<section>
+  <h2>References</h2>
+  <p>FlyRank. FlyRank ML Internship warehouse release. Hugging Face dataset repository, 2026.</p>
+</section>
+
+</div>
+</body>
+</html>
